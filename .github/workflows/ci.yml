@@ -1,0 +1,84 @@
+name: Bowlie CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: macos-14
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          components: rustfmt, clippy
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run test
+      - run: npm run build
+      - name: Check Rust formatting
+        working-directory: app/src-tauri
+        run: cargo fmt --check
+      - name: Lint Rust
+        working-directory: app/src-tauri
+        run: cargo clippy -- -D warnings
+      - name: Test Rust
+        working-directory: app/src-tauri
+        run: cargo test
+
+  build:
+    name: Build ${{ matrix.rust-target }}
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            rust-target: aarch64-apple-darwin
+          - os: macos-13
+            rust-target: x86_64-apple-darwin
+          - os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          targets: ${{ matrix.rust-target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: app/src-tauri
+      - run: npm ci
+      - run: npm run tauri build -- --ci --target ${{ matrix.rust-target }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Bowlie-${{ matrix.rust-target }}
+          path: app/src-tauri/target/${{ matrix.rust-target }}/release/bundle/**
+          if-no-files-found: error

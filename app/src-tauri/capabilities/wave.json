@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "wave",
+  "description": "Minimum capabilities for the wave window",
+  "windows": ["wave"],
+  "permissions": [
+    "core:event:default"
+  ]
+}
