@@ -37,8 +37,12 @@ cd src-tauri && cargo fmt --check
 npm run tauri build
 ```
 
-GitHub Actions builds macOS arm64, macOS x64, and Windows x64 artifacts on every push to `main` and on pull requests.
-Tag pushes starting with `v` create a GitHub Release with the same three-platform artifacts.
+GitHub Actions builds macOS arm64, macOS x64, and Windows x64 artifacts on every push to `main` and on pull requests. The macOS x64 artifact is cross-compiled on an arm64 runner.
+Tag pushes starting with `v` create a GitHub Release with the same three-platform artifacts and a SHA256SUMS file.
+
+## Security
+
+Release artifacts are currently unsigned; macOS builds are not notarized and Windows SmartScreen may warn. See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 
