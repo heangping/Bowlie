@@ -1,17 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+const windowMock = vi.hoisted(() => ({
+  onMoved: async () => () => undefined,
+  onScaleChanged: async () => () => undefined,
+  startDragging: vi.fn(),
+  outerPosition: async () => ({ x: 1000, y: 300 }),
+  innerSize: async () => ({ width: 400, height: 400 }),
+  scaleFactor: async () => 1,
+  setSize: vi.fn(async () => undefined),
+  setPosition: vi.fn(async () => undefined),
+}));
+
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({
-    onMoved: async () => () => undefined,
-    onScaleChanged: async () => () => undefined,
-    startDragging: vi.fn(),
-  }),
+  getCurrentWindow: () => windowMock,
 }));
 
 vi.mock("./settings", () => ({
@@ -70,6 +78,17 @@ beforeEach(async () => {
   const context = {
     setTransform: vi.fn(),
     clearRect: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    arcTo: vi.fn(),
+    closePath: vi.fn(),
+    stroke: vi.fn(),
+    fill: vi.fn(),
+    fillText: vi.fn(),
+    measureText: vi.fn(() => ({ width: 40 })),
   };
   getContext = vi
     .spyOn(HTMLCanvasElement.prototype, "getContext")
@@ -104,7 +123,12 @@ function canvasFrom(root: HTMLElement): HTMLCanvasElement {
   return canvas;
 }
 
-function pointerEvent(type: string, x: number, y: number): PointerEvent {
+function pointerEvent(
+  type: string,
+  x: number,
+  y: number,
+  screen?: { x: number; y: number },
+): PointerEvent {
   return new PointerEvent(type, {
     bubbles: true,
     cancelable: true,
@@ -112,6 +136,8 @@ function pointerEvent(type: string, x: number, y: number): PointerEvent {
     button: 0,
     clientX: x,
     clientY: y,
+    screenX: screen?.x ?? 0,
+    screenY: screen?.y ?? 0,
   });
 }
 
@@ -159,6 +185,27 @@ describe("pet interactions", () => {
     now = 460;
     canvas.dispatchEvent(pointerEvent("pointerdown", 200, 260));
     expect(invoke).toHaveBeenLastCalledWith("spawn_wave", { x: 200, y: 260, speed: 2 });
+  });
+
+  it("resizes from the window edge and keeps the opposite edge pinned", async () => {
+    stateModule.state.mode = "bowl";
+    const root = mountApp();
+    const canvas = canvasFrom(root);
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(400);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(400);
+    windowMock.setSize.mockClear();
+    windowMock.setPosition.mockClear();
+
+    // 窗口左上角在屏幕 1000,300；在西边缘（clientX 2）按下
+    canvas.dispatchEvent(pointerEvent("pointerdown", 2, 200, { x: 1002, y: 500 }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 指针往左拖 58px → 窗口变宽 58px，右边保持不动
+    canvas.dispatchEvent(pointerEvent("pointermove", 2, 200, { x: 1060, y: 500 }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(windowMock.setSize).toHaveBeenLastCalledWith(new LogicalSize(342, 342));
+    expect(windowMock.setPosition).toHaveBeenLastCalledWith(new LogicalPosition(1058, 300));
   });
 
   it("tightens while holding and restores after release", async () => {

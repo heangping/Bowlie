@@ -7,7 +7,7 @@ Bowlie is a cross-platform interactive desktop pet built with Vue 3, TypeScript,
 
 ## Status
 
-Bowlie is in early development (`0.1.2`). The apology uses the operating system's Chinese text-to-speech voice when available and falls back to in-app synthesized audio. No third-party voice recordings are bundled. macOS Apple Silicon, macOS Intel, and Windows x64 build support is included.
+Bowlie is in early development (`0.2.0`). The apology uses the operating system's Chinese text-to-speech voice when available and falls back to in-app synthesized audio. No third-party voice recordings are bundled. The pet window is resizable: drag any edge or corner to scale it between 240 and 800 px, and the size and position persist across launches. macOS Apple Silicon, macOS Intel, and Windows x64 build support is included.
 
 ## Requirements
 
@@ -22,6 +22,8 @@ cd app
 npm install
 npm run dev
 ```
+
+With the dev server running, open `http://localhost:1420/preview.html` to inspect the bowl artwork, the knock animation, the ripple layer, and the window resize behaviour in a plain browser — no Tauri window required. The preview page is not part of the bundled app.
 
 ## Verification
 

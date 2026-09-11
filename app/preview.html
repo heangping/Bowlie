@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bowlie 视觉预览</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      body {
+        background-color: #171410;
+        transition: background-color 0.25s ease;
+      }
+      body.light {
+        background-color: #f2efe7;
+      }
+      body.checker {
+        background-color: #ffffff;
+        background-image: linear-gradient(45deg, #d9d6cf 25%, transparent 25%),
+          linear-gradient(-45deg, #d9d6cf 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #d9d6cf 75%),
+          linear-gradient(-45deg, transparent 75%, #d9d6cf 75%);
+        background-size: 20px 20px;
+        background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+      }
+      #preview-canvas {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+      }
+      .hud {
+        position: fixed;
+        left: 14px;
+        top: 14px;
+        z-index: 10;
+        max-width: 300px;
+        color: #cfc7b6;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+      body.light .hud,
+      body.checker .hud {
+        color: #2f2c26;
+      }
+      .hud h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .hud p {
+        margin: 4px 0 0;
+        opacity: 0.75;
+      }
+      .hud .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        flex-wrap: wrap;
+      }
+      .hud button {
+        font: inherit;
+        padding: 4px 11px;
+        border-radius: 7px;
+        border: 1px solid currentColor;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+      .hud button[aria-pressed="true"] {
+        background: rgba(128, 128, 128, 0.3);
+        font-weight: 500;
+      }
+      .hud input[type="range"] {
+        width: 140px;
+      }
+      .hint {
+        position: fixed;
+        left: 50%;
+        bottom: 18px;
+        transform: translateX(-50%);
+        z-index: 10;
+        color: #cfc7b6;
+        font-size: 12px;
+        opacity: 0.7;
+      }
+      body.light .hint,
+      body.checker .hint {
+        color: #2f2c26;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="hud">
+      <h1>Bowlie 视觉预览</h1>
+      <p>鼠标移到方格边缘：出现金色边框与缩放光标，拖动即可缩放（对侧边固定不动）</p>
+      <p>点击钵体：敲击动画 + 钵声 + 波纹扩散到屏幕边缘</p>
+      <div class="row">
+        <button type="button" data-bg="" aria-pressed="true">深色桌面</button>
+        <button type="button" data-bg="light" aria-pressed="false">浅色桌面</button>
+        <button type="button" data-bg="checker" aria-pressed="false">透明棋盘</button>
+      </div>
+      <div class="row">
+        <span>窗口尺寸</span>
+        <input id="pet-size" type="range" min="240" max="800" step="20" />
+        <span id="pet-size-label">400 px</span>
+      </div>
+      <div class="row">
+        <button type="button" id="sound-toggle" aria-pressed="true">声音：开</button>
+      </div>
+    </div>
+    <div class="hint">边框提示 = 窗口边界（悬停或拖拽时出现，实际运行时同样如此）</div>
+    <script type="module" src="/src/preview/main.ts"></script>
+  </body>
+</html>

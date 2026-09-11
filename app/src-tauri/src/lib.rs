@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
+    WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
 const PET_LABEL: &str = "pet";
@@ -125,6 +125,15 @@ fn monitor_local_position(
     )
 }
 
+/// 波纹从点击点扩散到该显示器边缘所需的最大半径（逻辑像素）。
+///
+/// 取点击点到四条边的最远距离，留 5% 余量，保证视觉上确实抵达屏幕边缘而不是
+/// 在半途消散。窗口可缩放后点击位置会偏移，因此必须按实际点击点计算。
+fn wave_end_radius(x: f64, y: f64, width: f64, height: f64) -> f64 {
+    let farthest = x.max(width - x).max(y).max(height - y);
+    (farthest * 1.05).max(200.0)
+}
+
 #[tauri::command]
 fn spawn_wave(app: AppHandle, x: f64, y: f64, speed: f64) {
     let Some(pet) = pet_window(&app) else { return };
@@ -136,15 +145,22 @@ fn spawn_wave(app: AppHandle, x: f64, y: f64, speed: f64) {
         .ok()
         .flatten()
         .or_else(|| pet.primary_monitor().ok().flatten());
-    let (monitor_pos, scale) = match monitor {
-        Some(monitor) => (*monitor.position(), monitor.scale_factor()),
-        None => (PhysicalPosition::new(0, 0), 1.0),
+    let (monitor_pos, monitor_size, scale) = match monitor {
+        Some(monitor) => (*monitor.position(), *monitor.size(), monitor.scale_factor()),
+        None => (PhysicalPosition::new(0, 0), PhysicalSize::new(0, 0), 1.0),
     };
     let (wave_x, wave_y) = monitor_local_position(pos, monitor_pos, scale, x, y);
+    let end_radius = wave_end_radius(
+        wave_x,
+        wave_y,
+        monitor_size.width as f64 / scale,
+        monitor_size.height as f64 / scale,
+    );
     let payload = json!({
         "x": wave_x,
         "y": wave_y,
         "speed": speed.clamp(0.5, 3.0),
+        "endRadius": end_radius,
     });
     if let Some(wave) = app.get_webview_window(WAVE_LABEL) {
         let _ = wave.emit("wave:spawn", payload);
@@ -219,7 +235,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::monitor_local_position;
+    use super::{monitor_local_position, wave_end_radius};
     use tauri::PhysicalPosition;
 
     #[test]
@@ -232,5 +248,18 @@ mod tests {
             260.0,
         );
         assert_eq!(position, (860.0, 621.0));
+    }
+
+    #[test]
+    fn wave_end_radius_reaches_the_farthest_screen_edge() {
+        // 1920×1080 屏上点击点位于 (1200, 300)：最远边是左边缘（1200），
+        // 而非右边缘（720）或上边缘（300）。
+        assert!((wave_end_radius(1200.0, 300.0, 1920.0, 1080.0) - 1260.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn wave_end_radius_keeps_a_floor_when_monitor_bounds_are_unknown() {
+        // 显示器信息缺失时不应退化成 0，否则波纹会瞬间消散。
+        assert_eq!(wave_end_radius(0.0, 0.0, 0.0, 0.0), 200.0);
     }
 }
