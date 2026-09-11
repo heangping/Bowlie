@@ -1,6 +1,6 @@
 [package]
 name = "bowlie"
-version = "0.1.1"
+version = "0.1.2"
 description = "A cross-platform interactive desktop pet for emotional release"
 authors = ["heangping"]
 license = "MIT"

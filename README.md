@@ -7,7 +7,7 @@ Bowlie is a cross-platform interactive desktop pet built with Vue 3, TypeScript,
 
 ## Status
 
-Bowlie is in early development (`0.1.0`). The apology uses the operating system's Chinese text-to-speech voice when available and falls back to in-app synthesized audio. No third-party voice recordings are bundled. macOS Apple Silicon, macOS Intel, and Windows x64 build support is included.
+Bowlie is in early development (`0.1.2`). The apology uses the operating system's Chinese text-to-speech voice when available and falls back to in-app synthesized audio. No third-party voice recordings are bundled. macOS Apple Silicon, macOS Intel, and Windows x64 build support is included.
 
 ## Requirements
 
