@@ -1,5 +1,6 @@
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { availableMonitors, getCurrentWindow } from "@tauri-apps/api/window";
+import type { Monitor } from "@tauri-apps/api/window";
 import { Store } from "@tauri-apps/plugin-store";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { state } from "./state";
@@ -22,8 +23,10 @@ function isMode(value: unknown): value is Mode {
   return value === "bowl" || value === "circle";
 }
 
-export async function isRestorablePosition(position: WindowPosition): Promise<boolean> {
-  const monitors = await availableMonitors();
+function isRestorablePositionOnMonitors(
+  monitors: Monitor[],
+  position: WindowPosition,
+): boolean {
   return monitors.some((monitor) => {
     const scale = monitor.scaleFactor;
     const windowSize = PET_WINDOW_LOGICAL_SIZE * scale;
@@ -38,6 +41,56 @@ export async function isRestorablePosition(position: WindowPosition): Promise<bo
   });
 }
 
+export async function isRestorablePosition(position: WindowPosition): Promise<boolean> {
+  const monitors = await availableMonitors();
+  return isRestorablePositionOnMonitors(monitors, position);
+}
+
+function closestMonitor(
+  monitors: Monitor[],
+  position: PhysicalPosition,
+): Monitor | null {
+  return monitors.reduce<Monitor | null>((closest, monitor) => {
+    const workArea = monitor.workArea;
+    const centerX = workArea.position.x + workArea.size.width / 2;
+    const centerY = workArea.position.y + workArea.size.height / 2;
+    const distance = (position.x - centerX) ** 2 + (position.y - centerY) ** 2;
+    if (closest === null) return monitor;
+    const closestWorkArea = closest.workArea;
+    const closestCenterX = closestWorkArea.position.x + closestWorkArea.size.width / 2;
+    const closestCenterY = closestWorkArea.position.y + closestWorkArea.size.height / 2;
+    const closestDistance =
+      (position.x - closestCenterX) ** 2 + (position.y - closestCenterY) ** 2;
+    return distance < closestDistance ? monitor : closest;
+  }, null);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+export function visibleWindowPosition(
+  monitors: Monitor[],
+  position: PhysicalPosition,
+): PhysicalPosition {
+  const monitor = closestMonitor(monitors, position);
+  if (monitor === null) return position;
+
+  const scale = monitor.scaleFactor;
+  const windowSize = PET_WINDOW_LOGICAL_SIZE * scale;
+  const margin = RESTORE_VISIBLE_MARGIN * scale;
+  const workArea = monitor.workArea;
+  const minX = workArea.position.x + margin;
+  const maxX = workArea.position.x + workArea.size.width - windowSize - margin;
+  const minY = workArea.position.y + margin;
+  const maxY = workArea.position.y + workArea.size.height - windowSize - margin;
+
+  return new PhysicalPosition(
+    clamp(position.x, minX, Math.max(minX, maxX)),
+    clamp(position.y, minY, Math.max(minY, maxY)),
+  );
+}
+
 export async function loadSettings(): Promise<void> {
   store = await Store.load(SETTINGS_FILE, { autoSave: false });
 
@@ -49,15 +102,23 @@ export async function loadSettings(): Promise<void> {
     state.soundEnabled = savedSoundEnabled;
   }
 
+  const monitors = await availableMonitors();
   const savedPosition = await store.get<WindowPosition>("windowPosition");
   if (
     savedPosition &&
     Number.isFinite(savedPosition.x) &&
     Number.isFinite(savedPosition.y) &&
-    (await isRestorablePosition(savedPosition))
+    isRestorablePositionOnMonitors(monitors, savedPosition)
   ) {
     await getCurrentWindow().setPosition(
       new PhysicalPosition(savedPosition.x, savedPosition.y),
+    );
+  }
+
+  const currentPosition = await getCurrentWindow().outerPosition();
+  if (!isRestorablePositionOnMonitors(monitors, { x: currentPosition.x, y: currentPosition.y })) {
+    await getCurrentWindow().setPosition(
+      visibleWindowPosition(monitors, currentPosition),
     );
   }
 

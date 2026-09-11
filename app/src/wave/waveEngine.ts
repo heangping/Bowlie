@@ -4,6 +4,7 @@ import type { WaveSpawnPayload } from "../shared/types";
 interface Wave {
   x: number;
   y: number;
+  speed: number;
   born: number;
   seed: number;
 }
@@ -19,12 +20,22 @@ const TOTAL_T = T1 + HALF / V2;
 const FADE_START = TOTAL_T * 0.7;
 const MAX_WAVES = 32;
 
+export function waveRadiusAt(ageSeconds: number, speed = 1): number {
+  const age = ageSeconds * speed;
+  if (age < T1) return START_R + V1 * age;
+  return START_R + HALF + V2 * (age - T1);
+}
+
+export function isWaveExpired(ageSeconds: number, speed = 1): boolean {
+  return ageSeconds * speed >= TOTAL_T;
+}
+
 export function startWaveEngine(canvas: HTMLCanvasElement): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
   const waves: Wave[] = [];
-  let rafId = 0;
+  let timerId = 0;
 
   const resize = (): void => {
     const dpr = window.devicePixelRatio || 1;
@@ -52,9 +63,10 @@ export function startWaveEngine(canvas: HTMLCanvasElement): void {
   };
 
   const drawWave = (wave: Wave, now: number): void => {
-    const age = (now - wave.born) / 1000;
-    if (age >= TOTAL_T) return;
-    const r = age < T1 ? START_R + V1 * age : START_R + HALF + V2 * (age - T1);
+    const ageSeconds = (now - wave.born) / 1000;
+    if (isWaveExpired(ageSeconds, wave.speed)) return;
+    const age = ageSeconds * wave.speed;
+    const r = waveRadiusAt(ageSeconds, wave.speed);
     const opacity = age <= FADE_START ? 1 : 1 - (age - FADE_START) / (TOTAL_T - FADE_START);
 
     const { x, y, seed } = wave;
@@ -91,31 +103,33 @@ export function startWaveEngine(canvas: HTMLCanvasElement): void {
     }
   };
 
-  const frame = (now: number): void => {
+  const frame = (): void => {
+    const now = performance.now();
     ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     for (let i = waves.length - 1; i >= 0; i -= 1) {
       const wave = waves[i];
-      if ((now - wave.born) / 1000 >= TOTAL_T) {
+      if (isWaveExpired((now - wave.born) / 1000, wave.speed)) {
         waves.splice(i, 1);
         continue;
       }
       drawWave(wave, now);
     }
     if (waves.length > 0) {
-      rafId = requestAnimationFrame(frame);
+      timerId = window.setTimeout(frame, 16);
     } else {
-      rafId = 0;
+      timerId = 0;
     }
   };
 
   const kick = (): void => {
-    if (rafId === 0) rafId = requestAnimationFrame(frame);
+    if (timerId === 0) timerId = window.setTimeout(frame, 16);
   };
 
   void listen<WaveSpawnPayload>("wave:spawn", (event) => {
     waves.push({
       x: event.payload.x,
       y: event.payload.y,
+      speed: event.payload.speed,
       born: performance.now(),
       seed: Math.random() * Math.PI * 2,
     });
@@ -127,6 +141,11 @@ export function startWaveEngine(canvas: HTMLCanvasElement): void {
 
   void listen("wave:clear", () => {
     waves.length = 0;
+    if (timerId !== 0) {
+      window.clearTimeout(timerId);
+      timerId = 0;
+    }
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
   }).catch((error) => {
     console.error("wave clear listener failed:", error);
   });

@@ -3,6 +3,7 @@ export type Mode = "bowl" | "circle";
 export interface WaveSpawnPayload {
   x: number;
   y: number;
+  speed: number;
 }
 
 export interface PetState {

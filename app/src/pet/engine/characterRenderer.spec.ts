@@ -11,11 +11,11 @@ describe("character renderer", () => {
     expect(pressureForLevel(2.5)).toBeCloseTo(0.55);
   });
 
-  it("uses a rectangular hit area", () => {
-    expect(characterHitTest(200, 200, 400, 400)).toBe(true);
-    expect(characterHitTest(100, 200, 400, 400)).toBe(false);
-    expect(characterHitTest(300, 200, 400, 400)).toBe(false);
-    expect(characterHitTest(200, 70, 400, 400)).toBe(false);
-    expect(characterHitTest(200, 390, 400, 400)).toBe(false);
+  it("covers the cartoon head and body as one interaction area", () => {
+    expect(characterHitTest(200, 90, 400, 400)).toBe(true);
+    expect(characterHitTest(200, 230, 400, 400)).toBe(true);
+    expect(characterHitTest(95, 230, 400, 400)).toBe(false);
+    expect(characterHitTest(305, 230, 400, 400)).toBe(false);
+    expect(characterHitTest(200, 370, 400, 400)).toBe(false);
   });
 });

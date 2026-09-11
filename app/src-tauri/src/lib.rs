@@ -3,12 +3,27 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
 };
 
 const PET_LABEL: &str = "pet";
 const WAVE_LABEL: &str = "wave";
+
+#[cfg(target_os = "macos")]
+fn show_over_full_screen(window: &WebviewWindow) {
+    let Ok(ns_window_ptr) = window.ns_window() else {
+        eprintln!("macOS window handle missing");
+        return;
+    };
+    unsafe {
+        let ns_window = &*ns_window_ptr.cast::<objc2_app_kit::NSWindow>();
+        let behavior = ns_window.collectionBehavior()
+            | objc2_app_kit::NSWindowCollectionBehavior::CanJoinAllSpaces
+            | objc2_app_kit::NSWindowCollectionBehavior::FullScreenAuxiliary;
+        ns_window.setCollectionBehavior(behavior);
+    }
+}
 
 fn pet_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(PET_LABEL)
@@ -69,6 +84,8 @@ fn sync_wave_window(app: &AppHandle) {
     };
 
     if let Some(wave) = app.get_webview_window(WAVE_LABEL) {
+        #[cfg(target_os = "macos")]
+        show_over_full_screen(&wave);
         let _ = wave.emit("wave:clear", ());
         if let Err(e) = wave.set_position(LogicalPosition::new(x, y)) {
             eprintln!("wave position update failed: {e}");
@@ -84,26 +101,50 @@ fn sync_wave_window(app: &AppHandle) {
         eprintln!("wave window create failed: {e}");
         return;
     }
+    #[cfg(target_os = "macos")]
+    if let Some(wave) = app.get_webview_window(WAVE_LABEL) {
+        show_over_full_screen(&wave);
+    }
     if let Some(pet) = pet_window(app) {
+        #[cfg(target_os = "macos")]
+        show_over_full_screen(&pet);
         let _ = pet.set_focus();
     }
 }
 
+fn monitor_local_position(
+    pet_position: PhysicalPosition<i32>,
+    monitor_position: PhysicalPosition<i32>,
+    scale: f64,
+    x: f64,
+    y: f64,
+) -> (f64, f64) {
+    (
+        (pet_position.x - monitor_position.x) as f64 / scale + x,
+        (pet_position.y - monitor_position.y) as f64 / scale + y,
+    )
+}
+
 #[tauri::command]
-fn spawn_wave(app: AppHandle, x: f64, y: f64) {
+fn spawn_wave(app: AppHandle, x: f64, y: f64, speed: f64) {
     let Some(pet) = pet_window(&app) else { return };
     let Ok(pos) = pet.outer_position() else {
         return;
     };
-    let scale = pet
+    let monitor = pet
         .current_monitor()
         .ok()
         .flatten()
-        .map(|m| m.scale_factor())
-        .unwrap_or(1.0);
+        .or_else(|| pet.primary_monitor().ok().flatten());
+    let (monitor_pos, scale) = match monitor {
+        Some(monitor) => (*monitor.position(), monitor.scale_factor()),
+        None => (PhysicalPosition::new(0, 0), 1.0),
+    };
+    let (wave_x, wave_y) = monitor_local_position(pos, monitor_pos, scale, x, y);
     let payload = json!({
-        "x": pos.x as f64 / scale + x,
-        "y": pos.y as f64 / scale + y,
+        "x": wave_x,
+        "y": wave_y,
+        "speed": speed.clamp(0.5, 3.0),
     });
     if let Some(wave) = app.get_webview_window(WAVE_LABEL) {
         let _ = wave.emit("wave:spawn", payload);
@@ -174,4 +215,22 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![spawn_wave, clear_waves, quit_app])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::monitor_local_position;
+    use tauri::PhysicalPosition;
+
+    #[test]
+    fn converts_pet_positions_to_monitor_local_wave_coordinates() {
+        let position = monitor_local_position(
+            PhysicalPosition::new(-3800, 500),
+            PhysicalPosition::new(-5120, -222),
+            2.0,
+            200.0,
+            260.0,
+        );
+        assert_eq!(position, (860.0, 621.0));
+    }
 }

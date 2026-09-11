@@ -30,52 +30,81 @@ afterEach(() => {
 });
 
 describe("pet state", () => {
-  it("increments circle level and caps at max", () => {
+  it("tightens continuously while the character is held", () => {
     stateModule.switchMode("circle");
+    stateModule.beginCircleHold(0);
 
-    expect(stateModule.pressCircle()).toBe(1);
-    expect(stateModule.pressCircle()).toBe(2);
-    expect(stateModule.pressCircle()).toBe(3);
-    expect(stateModule.pressCircle()).toBe(4);
-    expect(stateModule.pressCircle()).toBe(4);
+    stateModule.updateCircleHold(0);
+    expect(stateModule.state.circleLevel).toBe(0);
+    stateModule.updateCircleHold(400);
+    expect(stateModule.state.circleLevel).toBe(1);
+    stateModule.updateCircleHold(800);
+    expect(stateModule.state.circleLevel).toBe(2);
+    stateModule.updateCircleHold(1600);
+    expect(stateModule.state.circleLevel).toBe(4);
+    stateModule.updateCircleHold(2200);
+    expect(stateModule.state.circleLevel).toBe(4);
+    expect(stateModule.state.circleHolding).toBe(true);
   });
 
-  it("restores from the pre-restore level plus one", () => {
+  it("restores from the level reached before restoration", () => {
     stateModule.switchMode("circle");
-    stateModule.pressCircle();
-    stateModule.pressCircle();
+    stateModule.beginCircleHold(0);
+    stateModule.updateCircleHold(800);
+    stateModule.endCircleHold();
 
     vi.advanceTimersByTime(1500);
     expect(stateModule.state.restoring).toBe(true);
     expect(stateModule.state.circleLevel).toBe(0);
 
-    expect(stateModule.pressCircle()).toBe(3);
+    stateModule.beginCircleHold(3100);
+    stateModule.updateCircleHold(3100);
+    expect(stateModule.state.circleLevel).toBe(2);
+    stateModule.updateCircleHold(3500);
+    expect(stateModule.state.circleLevel).toBe(3);
     expect(stateModule.state.restoring).toBe(false);
   });
 
   it("finishes restore and starts from idle", () => {
     stateModule.switchMode("circle");
-    stateModule.pressCircle();
-    stateModule.pressCircle();
+    stateModule.beginCircleHold(0);
+    stateModule.updateCircleHold(400);
+    stateModule.endCircleHold();
 
     vi.advanceTimersByTime(1500 + 1600);
     expect(stateModule.state.restoring).toBe(false);
     expect(stateModule.state.circleLevel).toBe(0);
 
-    expect(stateModule.pressCircle()).toBe(1);
+    stateModule.beginCircleHold(3100);
+    stateModule.updateCircleHold(3500);
+    expect(stateModule.state.circleLevel).toBe(1);
   });
 
   it("resets mode state and clears waves on switch", () => {
     stateModule.switchMode("circle");
-    stateModule.pressCircle();
-    stateModule.pressCircle();
+    stateModule.beginCircleHold(0);
+    stateModule.updateCircleHold(800);
 
     stateModule.switchMode("bowl");
 
     expect(stateModule.state.mode).toBe("bowl");
     expect(stateModule.state.circleLevel).toBe(0);
+    expect(stateModule.state.circleHolding).toBe(false);
     expect(stateModule.state.restoring).toBe(false);
     expect(invoke).toHaveBeenCalledWith("clear_waves");
+  });
+
+  it("maps click cadence to wave speed", () => {
+    expect(stateModule.bowlWaveSpeed(120)).toBe(3);
+    expect(stateModule.bowlWaveSpeed(460)).toBe(2);
+    expect(stateModule.bowlWaveSpeed(800)).toBe(1);
+    expect(stateModule.bowlWaveSpeed(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+
+  it("returns a faster wave speed for consecutive clicks", () => {
+    now = 0;
+    expect(stateModule.registerBowlClick(0)).toBe(1);
+    expect(stateModule.registerBowlClick(460)).toBe(2);
   });
 
   it("triggers fahai after 31 clicks in a 30-second window", () => {
@@ -101,6 +130,7 @@ describe("pet state", () => {
 
     now = 5000;
     for (let index = 0; index < 31; index += 1) {
+      now = index * 100;
       stateModule.registerBowlClick();
     }
     expect(stateModule.state.fahaiVisible).toBe(false);
@@ -113,8 +143,8 @@ describe("pet state", () => {
     }
     vi.advanceTimersByTime(2500);
 
-    now = 34000;
     for (let index = 0; index < 31; index += 1) {
+      now = 34000 + index * 100;
       stateModule.registerBowlClick();
     }
 

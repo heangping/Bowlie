@@ -2,7 +2,15 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { state, switchMode, pressCircle, toggleSound, registerBowlClick } from "./state";
+import {
+  state,
+  switchMode,
+  beginCircleHold,
+  updateCircleHold,
+  endCircleHold,
+  toggleSound,
+  registerBowlClick,
+} from "./state";
 import {
   disposeSettings,
   loadSettings,
@@ -25,7 +33,7 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 const menu = reactive({ show: false, x: 0, y: 0 });
 
 let ctx: CanvasRenderingContext2D | null = null;
-let rafId = 0;
+let timerId = 0;
 let unlistenMoved: (() => void) | null = null;
 let unlistenScaleChanged: (() => void) | null = null;
 /** 紧箍咒显示等级的连续插值，向 circleLevel 逼近 */
@@ -34,6 +42,9 @@ let lastFrameAt = 0;
 let dragStart: { x: number; y: number } | null = null;
 let dragStarted = false;
 let dragPointerId: number | null = null;
+let circlePointerId: number | null = null;
+let circlePressAt = 0;
+let lastPainLevel = 0;
 const audioPool = new AudioPool(4);
 const bowlSoundFactories: Array<() => Stoppable> = [
   () => playBowlSound(0),
@@ -56,7 +67,8 @@ const resize = (): void => {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 };
 
-const frame = (now: number): void => {
+const frame = (): void => {
+  const now = performance.now();
   if (!ctx) return;
   if (lastFrameAt === 0) lastFrameAt = now;
   const deltaSeconds = Math.min(Math.max((now - lastFrameAt) / 1000, 0), 0.05);
@@ -65,12 +77,22 @@ const frame = (now: number): void => {
   if (state.mode === "bowl") {
     drawBowl(ctx, 400, 400, now, state.bowlHitAt);
   } else {
-    const smoothing = 1 - Math.exp(-deltaSeconds / 0.4);
+    updateCircleHold(now);
+    const smoothing = 1 - Math.exp(-deltaSeconds / 0.16);
     displayLevel += (state.circleLevel - displayLevel) * smoothing;
     if (Math.abs(state.circleLevel - displayLevel) < 0.01) displayLevel = state.circleLevel;
-    drawCharacter(ctx, 400, 400, now, displayLevel);
+    const painLevel = Math.min(Math.floor(displayLevel) + 1, 4);
+    if (state.circleHolding && painLevel > lastPainLevel) {
+      lastPainLevel = painLevel;
+      if (state.soundEnabled) {
+        if (!speakApology(painLevel)) {
+          painAudioPool.playAt(painVariantForLevel(painLevel), painSoundFactories);
+        }
+      }
+    }
+    drawCharacter(ctx, 400, 400, now, displayLevel, circlePressAt);
   }
-  rafId = requestAnimationFrame(frame);
+  timerId = window.setTimeout(frame, 16);
 };
 
 const beginBackgroundDrag = (event: PointerEvent): void => {
@@ -88,9 +110,10 @@ const onPointerDown = (event: PointerEvent): void => {
   const y = event.clientY;
   if (state.mode === "bowl") {
     if (bowlHitTest(x, y, 400, 400)) {
-      state.bowlHitAt = performance.now();
-      registerBowlClick();
-      void invoke("spawn_wave", { x, y });
+      const now = performance.now();
+      state.bowlHitAt = now;
+      const waveSpeed = registerBowlClick();
+      void invoke("spawn_wave", { x, y, speed: waveSpeed });
       if (state.soundEnabled) audioPool.play(bowlSoundFactories);
     } else {
       beginBackgroundDrag(event);
@@ -98,11 +121,17 @@ const onPointerDown = (event: PointerEvent): void => {
     return;
   }
   if (characterHitTest(x, y, 400, 400)) {
-    const level = pressCircle();
-    if (state.soundEnabled) {
-      if (!speakApology(level)) {
-        painAudioPool.playAt(painVariantForLevel(level), painSoundFactories);
-      }
+    const now = performance.now();
+    circlePointerId = event.pointerId;
+    circlePressAt = now;
+    lastPainLevel = Math.min(Math.floor(state.circleLevel) + 1, 4);
+    beginCircleHold(now);
+    updateCircleHold(now);
+    if (state.soundEnabled && !speakApology(Math.max(lastPainLevel, 1))) {
+      painAudioPool.playAt(painVariantForLevel(lastPainLevel), painSoundFactories);
+    }
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.setPointerCapture(event.pointerId);
     }
   } else {
     beginBackgroundDrag(event);
@@ -116,6 +145,24 @@ const onDragMove = (event: PointerEvent): void => {
   if (Math.hypot(dx, dy) < 5) return;
   dragStarted = true;
   void getCurrentWindow().startDragging();
+};
+
+const endPointerInteraction = (event?: PointerEvent): void => {
+  if (
+    event &&
+    circlePointerId === event.pointerId &&
+    event.currentTarget instanceof HTMLElement &&
+    event.currentTarget.hasPointerCapture(circlePointerId)
+  ) {
+    event.currentTarget.releasePointerCapture(circlePointerId);
+  }
+  if (circlePointerId === event?.pointerId || event?.type === "lostpointercapture") {
+    endCircleHold();
+    circlePointerId = null;
+    circlePressAt = 0;
+    lastPainLevel = 0;
+  }
+  endDrag(event);
 };
 
 const endDrag = (event?: PointerEvent): void => {
@@ -165,7 +212,7 @@ const onContextMenu = (event: MouseEvent): void => {
   event.preventDefault();
   menu.show = true;
   menu.x = Math.min(Math.max(event.clientX, 8), 400 - 124);
-  menu.y = Math.min(Math.max(event.clientY, 8), 400 - 104);
+  menu.y = Math.min(Math.max(event.clientY, 8), 400 - 136);
 };
 
 const onGlobalMouseDown = (event: MouseEvent): void => {
@@ -190,7 +237,7 @@ onMounted(() => {
   if (!canvas) return;
   ctx = canvas.getContext("2d");
   resize();
-  rafId = requestAnimationFrame(frame);
+  timerId = window.setTimeout(frame, 16);
   warmUpApologySpeech();
   window.addEventListener("mousedown", onGlobalMouseDown);
 
@@ -208,10 +255,11 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(rafId);
+  window.clearTimeout(timerId);
   window.removeEventListener("mousedown", onGlobalMouseDown);
   unlistenMoved?.();
   unlistenScaleChanged?.();
+  endCircleHold();
   endDrag();
   stopApologySpeech();
   disposeSettings();
@@ -220,10 +268,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="root">
-    <div class="mode-bar">
-      <button :class="{ active: state.mode === 'bowl' }" @click="onSwitchMode('bowl')">颂钵</button>
-      <button :class="{ active: state.mode === 'circle' }" @click="onSwitchMode('circle')">紧箍咒</button>
-    </div>
     <canvas
       ref="canvasRef"
       class="pet-canvas"
@@ -231,13 +275,16 @@ onBeforeUnmount(() => {
       height="400"
       @pointerdown="onPointerDown"
       @pointermove="onDragMove"
-      @pointerup="endDrag"
-      @pointercancel="endDrag"
-      @lostpointercapture="endDrag"
+      @pointerup="endPointerInteraction"
+      @pointercancel="endPointerInteraction"
+      @lostpointercapture="endPointerInteraction"
       @contextmenu="onContextMenu"
     ></canvas>
     <div v-if="state.fahaiVisible" class="fahai-bubble">你是法海，在这收妖呢？</div>
     <div v-if="menu.show" class="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
+      <div class="menu-item" @click="onSwitchMode(state.mode === 'bowl' ? 'circle' : 'bowl'); menu.show = false">
+        {{ state.mode === "bowl" ? "切换为紧箍咒" : "切换为颂钵" }}
+      </div>
       <div class="menu-item" @click="onToggleSound(); menu.show = false">
         {{ state.soundEnabled ? "静音" : "取消静音" }}
       </div>
@@ -256,33 +303,11 @@ onBeforeUnmount(() => {
   height: 400px;
   user-select: none;
 }
-.mode-bar {
-  position: absolute;
-  top: 6px;
-  left: 0;
-  right: 0;
-  height: 24px;
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-  z-index: 3;
-}
-.mode-bar button {
-  border: 1px solid rgba(212, 160, 23, 0.5);
-  background: rgba(30, 22, 10, 0.55);
-  color: #e8c97a;
-  font-size: 12px;
-  border-radius: 12px;
-  padding: 2px 12px;
-  cursor: pointer;
-}
-.mode-bar button.active {
-  background: rgba(212, 160, 23, 0.85);
-  color: #241a08;
-}
 .pet-canvas {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   z-index: 2;
 }
 .fahai-bubble {
